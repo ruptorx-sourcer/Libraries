@@ -1,10 +1,12 @@
 local metatable = {}
 
--- Cache functions
+-- Cache functions with fallbacks
 local getrawmetatable = getrawmetatable or getmetatable
 local setreadonly = setreadonly or make_writeable or function() end
 local make_readonly = make_readonly or setreadonly or function() end
 local newcclosure = newcclosure or function(f) return f end
+local islclosure = islclosure or function() return false end
+local checkcaller = checkcaller or function() return false end
 
 -- Storage for original methods
 local originalGameMT = nil
@@ -145,12 +147,12 @@ function metatable.scanIntegrity()
 	end
 	
 	-- Test 2: Check if functions are Lua closures (detectable)
-	if islclosure and islclosure(currentMT.__index) then
+	if islclosure(currentMT.__index) then
 		report.details.indexIsLuaClosure = true
 		report.detectable = true
 	end
 	
-	if islclosure and islclosure(currentMT.__newindex) then
+	if islclosure(currentMT.__newindex) then
 		report.details.newindexIsLuaClosure = true
 		report.detectable = true
 	end
