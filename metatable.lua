@@ -68,4 +68,17 @@ function metatable.routeNamecall(functionName)
 	end
 end
 
+-- Hook
+function metatable.hookFunc(targetFunction, functionName)
+	local originalFunc = hookfunction(targetFunction, newcclosure(function(...)
+		if _G[functionName] then
+			local result = _G[functionName](...)
+			if result ~= nil then
+				return result
+			end
+		end
+		return originalFunc(...)
+	end))
+end
+
 return metatable
