@@ -1,88 +1,179 @@
 local metatable = {}
 
--- Use specific instance metatables instead of hooking game globally
-local instanceMetatables = {}
-local originalMetamethods = {}
-
 -- Cache functions
-local getrawmetatable = getrawmetatable
-local setreadonly = setreadonly
+local getrawmetatable = getrawmetatable or getmetatable
+local setreadonly = setreadonly or make_writeable or function() end
+local make_readonly = make_readonly or setreadonly or function() end
 local newcclosure = newcclosure or function(f) return f end
-local checkcaller = checkcaller or function() return false end
 
--- Hook specific instance type metatable (stealth)
-local function hookInstanceMetatable(instanceType, metamethod, handler)
-	local success, sample = pcall(function()
-		return game:GetService("Players").LocalPlayer.Character:FindFirstChildOfClass(instanceType)
-	end)
-	
-	if not success then
-		-- Create a dummy instance to get its metatable
-		local dummyMap = {
-			Humanoid = function() 
-				return game:GetService("Players").LocalPlayer.Character:WaitForChild("Humanoid")
-			end
-		}
-		
-		if dummyMap[instanceType] then
-			sample = dummyMap[instanceType]()
-		end
+-- Storage for original methods
+local originalGameMT = nil
+local originalIndex = nil
+local originalNewIndex = nil
+
+-- Integrity data
+metatable.integrity = {
+	hooked = false,
+	detectable = false,
+	gameMTModified = false,
+	indexChanged = false,
+	newindexChanged = false
+}
+
+-- Initialize game metatable hook
+function metatable.init()
+	if metatable.integrity.hooked then
+		return false, "Already hooked"
 	end
 	
-	if sample then
-		local mt = getrawmetatable(sample)
-		setreadonly(mt, false)
+	local success, err = pcall(function()
+		-- Get game metatable
+		originalGameMT = getrawmetatable(game)
 		
-		if not originalMetamethods[instanceType] then
-			originalMetamethods[instanceType] = {}
-		end
+		-- Store originals
+		originalIndex = originalGameMT.__index
+		originalNewIndex = originalGameMT.__newindex
 		
-		if not originalMetamethods[instanceType][metamethod] then
-			originalMetamethods[instanceType][metamethod] = mt[metamethod]
-		end
+		-- Make writable
+		setreadonly(originalGameMT, false)
 		
-		mt[metamethod] = newcclosure(handler)
-		setreadonly(mt, true)
-		
-		instanceMetatables[instanceType] = mt
-		return true
+		-- Mark as hooked
+		metatable.integrity.hooked = true
+		metatable.integrity.gameMTModified = true
+	end)
+	
+	return success, err
+end
+
+-- Hook __index (reads)
+function metatable.hookIndex(handler)
+	if not metatable.integrity.hooked then
+		return false, "Not initialized - call metatable.init() first"
 	end
 	
-	return false
-end
-
--- Route __index for specific instance type
-function metatable.routeIndexFor(instanceType, functionName)
-	return hookInstanceMetatable(instanceType, "__index", function(self, key)
-		if _G[functionName] then
-			local result = _G[functionName](self, key)
-			if result ~= nil then
-				return result
+	local success, err = pcall(function()
+		originalGameMT.__index = newcclosure(function(self, key)
+			-- Call user handler
+			if handler then
+				local result = handler(self, key)
+				if result ~= nil then
+					return result
+				end
 			end
-		end
-		return originalMetamethods[instanceType]["__index"](self, key)
+			
+			-- Call original
+			return originalIndex(self, key)
+		end)
+		
+		metatable.integrity.indexChanged = true
 	end)
+	
+	return success, err
 end
 
--- Route __newindex for specific instance type
-function metatable.routeNewIndexFor(instanceType, functionName)
-	return hookInstanceMetatable(instanceType, "__newindex", function(self, key, value)
-		if _G[functionName] then
-			local result = _G[functionName](self, key, value)
-			if result == false then
-				return -- Block write
-			end
-		end
-		return originalMetamethods[instanceType]["__newindex"](self, key, value)
-	end)
-end
-
--- Get original method (for direct calls)
-function metatable.getOriginal(instanceType, metamethod)
-	if originalMetamethods[instanceType] and originalMetamethods[instanceType][metamethod] then
-		return originalMetamethods[instanceType][metamethod]
+-- Hook __newindex (writes)
+function metatable.hookNewIndex(handler)
+	if not metatable.integrity.hooked then
+		return false, "Not initialized - call metatable.init() first"
 	end
-	return nil
+	
+	local success, err = pcall(function()
+		originalGameMT.__newindex = newcclosure(function(self, key, value)
+			-- Call user handler
+			if handler then
+				local block = handler(self, key, value)
+				if block == false then
+					return -- Block the write
+				end
+			end
+			
+			-- Call original
+			return originalNewIndex(self, key, value)
+		end)
+		
+		metatable.integrity.newindexChanged = true
+	end)
+	
+	return success, err
+end
+
+-- Finalize (make readonly again)
+function metatable.finalize()
+	if not metatable.integrity.hooked then
+		return false, "Not initialized"
+	end
+	
+	pcall(function()
+		make_readonly(originalGameMT, true)
+	end)
+	
+	return true
+end
+
+-- Get original methods for internal use
+function metatable.getOriginalIndex()
+	return originalIndex
+end
+
+function metatable.getOriginalNewIndex()
+	return originalNewIndex
+end
+
+-- Integrity scanner
+function metatable.scanIntegrity()
+	local report = {
+		hooked = metatable.integrity.hooked,
+		detectable = false,
+		details = {}
+	}
+	
+	if not metatable.integrity.hooked then
+		report.details.status = "Not hooked"
+		return report
+	end
+	
+	-- Test 1: Check if metatable was actually modified
+	local currentMT = getrawmetatable(game)
+	if currentMT.__index ~= originalIndex then
+		report.details.indexModified = true
+		report.detectable = true
+	end
+	
+	if currentMT.__newindex ~= originalNewIndex then
+		report.details.newindexModified = true
+		report.detectable = true
+	end
+	
+	-- Test 2: Check if functions are Lua closures (detectable)
+	if islclosure and islclosure(currentMT.__index) then
+		report.details.indexIsLuaClosure = true
+		report.detectable = true
+	end
+	
+	if islclosure and islclosure(currentMT.__newindex) then
+		report.details.newindexIsLuaClosure = true
+		report.detectable = true
+	end
+	
+	-- Test 3: Check if newcclosure worked
+	if newcclosure then
+		report.details.newcclosureAvailable = true
+	else
+		report.details.newcclosureAvailable = false
+		report.detectable = true
+	end
+	
+	-- Test 4: Try to detect metamethod comparison
+	local testFunc = function() end
+	local wrapped = newcclosure(testFunc)
+	if testFunc == wrapped then
+		report.details.newcclosureNotWorking = true
+		report.detectable = true
+	end
+	
+	metatable.integrity.detectable = report.detectable
+	
+	return report
 end
 
 return metatable
