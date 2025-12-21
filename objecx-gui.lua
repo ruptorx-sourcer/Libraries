@@ -5,6 +5,8 @@ gui.update = {}
 gui.get = {}
 
 local windows = {}
+local notifications = {}
+local notificationYOffset = 10
 local screenGui
 local callbackFunctions = {}
 local windowZIndex = 1
@@ -22,7 +24,7 @@ end
 local function getScale()
 	local device = getDeviceType()
 	if device == "mobile" then
-		return 0.9
+		return 1  -- Changed from 0.9 to 1
 	else
 		return 0.75
 	end
@@ -42,6 +44,21 @@ local palette = {
 	closeButton = Color3.fromRGB(200, 20, 20),
 	tabActive = Color3.fromRGB(50, 130, 210),
 	tabInactive = Color3.fromRGB(25, 25, 25)
+}
+
+-- Notification type colors
+local notificationColors = {
+	failure = Color3.fromRGB(200, 50, 50),
+	warning = Color3.fromRGB(220, 180, 50),
+	success = Color3.fromRGB(50, 200, 80),
+	idle = Color3.fromRGB(100, 100, 100),
+	error = Color3.fromRGB(220, 40, 40),
+	crash = Color3.fromRGB(150, 0, 0),
+	hang = Color3.fromRGB(180, 140, 0),
+	working = Color3.fromRGB(80, 150, 220),
+	critical = Color3.fromRGB(255, 0, 0),
+	done = Color3.fromRGB(60, 180, 100),
+	normal = Color3.fromRGB(80, 80, 80)
 }
 
 -- Initialize ScreenGui
@@ -113,11 +130,17 @@ local function calculateWindowHeight(elements, scale)
 		end
 	end
 	
-	local extraSpace = 13 * scale
+	local extraSpace = 8 * scale
 	
+	-- Add extra space if last element is a dropdown
 	if lastElement and lastElement.type == "dropdown" then
 		local dropdownOptionsHeight = (#lastElement.options * 22 * scale) + (3 * scale)
 		extraSpace = extraSpace + dropdownOptionsHeight + (20 * scale)
+	end
+	
+	-- Add extra space if last element is a label (text element)
+	if lastElement and lastElement.type == "label" then
+		extraSpace = extraSpace + (13 * scale)
 	end
 	
 	return maxY + extraSpace
@@ -802,6 +825,267 @@ function createElement(windowName, elementData, index, targetContainer)
 	}
 end
 
+-- Create notification
+function gui.add.notification(notificationName, properties)
+	initScreenGui()
+	
+	if notifications[notificationName] then
+		warn("Notification '" .. notificationName .. "' already exists")
+		return
+	end
+	
+	local scale = getScale()
+	local deviceType = getDeviceType()
+	
+	local notifWidth = 300 * scale
+	local notifHeight = properties.imageLabel and properties.imageLabel ~= "" and properties.imageLabel ~= "0" and (80 * scale) or (60 * scale)
+	
+	local notifFrame = Instance.new("Frame")
+	notifFrame.Name = notificationName
+	notifFrame.Size = UDim2.new(0, notifWidth, 0, notifHeight)
+	
+	if deviceType == "mobile" then
+		notifFrame.Position = UDim2.new(0.5, -(notifWidth / 2), 0, -notifHeight - 20)
+	else
+		notifFrame.Position = UDim2.new(1, notifWidth + 20, 0, notificationYOffset)
+	end
+	
+	notifFrame.BackgroundColor3 = palette.windowBg
+	notifFrame.BackgroundTransparency = 0.25
+	notifFrame.BorderSizePixel = 0
+	notifFrame.Parent = screenGui
+	
+	local notifCorner = Instance.new("UICorner")
+	notifCorner.CornerRadius = UDim.new(0, 6 * scale)
+	notifCorner.Parent = notifFrame
+	
+	-- Time left bar
+	local timeBar = Instance.new("Frame")
+	timeBar.Name = "TimeBar"
+	timeBar.Size = UDim2.new(1, 0, 0, 3 * scale)
+	timeBar.Position = UDim2.new(0, 0, 1, -(3 * scale))
+	timeBar.BackgroundColor3 = notificationColors[properties.notificationType] or notificationColors.normal
+	timeBar.BackgroundTransparency = 0
+	timeBar.BorderSizePixel = 0
+	timeBar.Parent = notifFrame
+	
+	local timeBarCorner = Instance.new("UICorner")
+	timeBarCorner.CornerRadius = UDim.new(0, 6 * scale)
+	timeBarCorner.Parent = timeBar
+	
+	-- Image label (if provided)
+	local contentXOffset = 10 * scale
+	if properties.imageLabel and properties.imageLabel ~= "" and properties.imageLabel ~= "0" then
+		local imageLabel = Instance.new("ImageLabel")
+		imageLabel.Name = "Icon"
+		imageLabel.Size = UDim2.new(0, 50 * scale, 0, 50 * scale)
+		imageLabel.Position = UDim2.new(0, 10 * scale, 0, 10 * scale)
+		imageLabel.BackgroundTransparency = 1
+		imageLabel.Image = properties.imageLabel
+		imageLabel.Parent = notifFrame
+		
+		local imageCorner = Instance.new("UICorner")
+		imageCorner.CornerRadius = UDim.new(0, 4 * scale)
+		imageCorner.Parent = imageLabel
+		
+		contentXOffset = 70 * scale
+	end
+	
+	-- Title
+	local title = Instance.new("TextLabel")
+	title.Name = "Title"
+	title.Size = UDim2.new(1, -(contentXOffset + (properties.closeable and 30 * scale or 10 * scale)), 0, 20 * scale)
+	title.Position = UDim2.new(0, contentXOffset, 0, 8 * scale)
+	title.BackgroundTransparency = 1
+	title.Text = properties.title or "Notification"
+	title.TextColor3 = properties.titleColor or palette.text
+	title.Font = Enum.Font.SourceSansBold
+	title.TextSize = 15 * scale
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.TextYAlignment = Enum.TextYAlignment.Top
+	title.TextTruncate = Enum.TextTruncate.AtEnd
+	title.Parent = notifFrame
+	
+	-- Description
+	local desc = Instance.new("TextLabel")
+	desc.Name = "Description"
+	desc.Size = UDim2.new(1, -(contentXOffset + (properties.closeable and 30 * scale or 10 * scale)), 0, notifHeight - 35 * scale)
+	desc.Position = UDim2.new(0, contentXOffset, 0, 28 * scale)
+	desc.BackgroundTransparency = 1
+	desc.Text = properties.desc or ""
+	desc.TextColor3 = properties.descColor or Color3.fromRGB(200, 200, 200)
+	desc.Font = Enum.Font.SourceSans
+	desc.TextSize = 13 * scale
+	desc.TextXAlignment = Enum.TextXAlignment.Left
+	desc.TextYAlignment = Enum.TextYAlignment.Top
+	desc.TextWrapped = true
+	desc.Parent = notifFrame
+	
+	-- Close button (if closeable)
+	if properties.closeable then
+		local closeBtn = Instance.new("TextButton")
+		closeBtn.Name = "CloseButton"
+		closeBtn.Size = UDim2.new(0, 20 * scale, 0, 20 * scale)
+		closeBtn.Position = UDim2.new(1, -(25 * scale), 0, 5 * scale)
+		closeBtn.BackgroundColor3 = palette.closeButton
+		closeBtn.BackgroundTransparency = 0.3
+		closeBtn.BorderSizePixel = 0
+		closeBtn.Text = "×"
+		closeBtn.TextColor3 = palette.text
+		closeBtn.Font = Enum.Font.SourceSansBold
+		closeBtn.TextSize = 16 * scale
+		closeBtn.Parent = notifFrame
+		
+		local closeBtnCorner = Instance.new("UICorner")
+		closeBtnCorner.CornerRadius = UDim.new(0.5, 0)
+		closeBtnCorner.Parent = closeBtn
+		
+		closeBtn.MouseEnter:Connect(function()
+			closeBtn.BackgroundColor3 = Color3.fromRGB(220, 30, 30)
+			closeBtn.BackgroundTransparency = 0
+		end)
+		
+		closeBtn.MouseLeave:Connect(function()
+			closeBtn.BackgroundColor3 = palette.closeButton
+			closeBtn.BackgroundTransparency = 0.3
+		end)
+		
+		closeBtn.MouseButton1Click:Connect(function()
+			if properties.onClose then
+				executeCallback(properties.onClose)
+			else
+				gui.closeNotif(notificationName)
+			end
+		end)
+	end
+	
+	-- Clickable
+	if properties.clickable and properties.onClick then
+		local clickBtn = Instance.new("TextButton")
+		clickBtn.Name = "ClickArea"
+		clickBtn.Size = UDim2.new(1, 0, 1, 0)
+		clickBtn.BackgroundTransparency = 1
+		clickBtn.Text = ""
+		clickBtn.Parent = notifFrame
+		
+		clickBtn.MouseButton1Click:Connect(function()
+			executeCallback(properties.onClick)
+		end)
+		
+		clickBtn.MouseEnter:Connect(function()
+			notifFrame.BackgroundTransparency = 0.15
+		end)
+		
+		clickBtn.MouseLeave:Connect(function()
+			notifFrame.BackgroundTransparency = 0.25
+		end)
+	end
+	
+	-- Store notification
+	notifications[notificationName] = {
+		frame = notifFrame,
+		timeBar = timeBar,
+		timeout = properties.timeout or 5,
+		startTime = tick(),
+		deviceType = deviceType
+	}
+	
+	-- Slide in animation
+	local targetPos
+	if deviceType == "mobile" then
+		targetPos = UDim2.new(0.5, -(notifWidth / 2), 0, notificationYOffset)
+	else
+		targetPos = UDim2.new(1, -(notifWidth + 10), 0, notificationYOffset)
+	end
+	
+	notifFrame:TweenPosition(targetPos, Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.3, true)
+	
+	-- Update notification Y offset for next notification
+	notificationYOffset = notificationYOffset + notifHeight + (10 * scale)
+	
+	-- Auto-close timeout
+	if properties.timeout and properties.timeout > 0 then
+		task.spawn(function()
+			local startTime = tick()
+			local duration = properties.timeout
+			
+			while tick() - startTime < duration do
+				if not notifications[notificationName] then break end
+				
+				local elapsed = tick() - startTime
+				local progress = 1 - (elapsed / duration)
+				timeBar.Size = UDim2.new(progress, 0, 0, 3 * scale)
+				
+				task.wait(0.03)
+			end
+			
+			if notifications[notificationName] then
+				gui.closeNotif(notificationName)
+			end
+		end)
+	else
+		timeBar.Visible = false
+	end
+	
+	return notifFrame
+end
+
+-- Close notification
+function gui.closeNotif(notificationName)
+	local notif = notifications[notificationName]
+	if not notif then return end
+	
+	local scale = getScale()
+	local notifWidth = notif.frame.Size.X.Offset
+	local deviceType = notif.deviceType
+	
+	-- Slide out animation
+	local slideOutPos
+	if deviceType == "mobile" then
+		slideOutPos = UDim2.new(0.5, -(notifWidth / 2), 0, -notif.frame.Size.Y.Offset - 20)
+	else
+		slideOutPos = UDim2.new(1, notifWidth + 20, 0, notif.frame.Position.Y.Offset)
+	end
+	
+	notif.frame:TweenPosition(
+		slideOutPos,
+		Enum.EasingDirection.In,
+		Enum.EasingStyle.Quad,
+		0.3,
+		true,
+		function()
+			notif.frame:Destroy()
+		end
+	)
+	
+	-- Shift remaining notifications up
+	local closedHeight = notif.frame.Size.Y.Offset + (10 * scale)
+	local closedYPos = notif.frame.Position.Y.Offset
+	
+	for name, data in pairs(notifications) do
+		if data.frame.Position.Y.Offset > closedYPos then
+			local newYPos = data.frame.Position.Y.Offset - closedHeight
+			local newPos
+			
+			if data.deviceType == "mobile" then
+				newPos = UDim2.new(0.5, -(notifWidth / 2), 0, newYPos)
+			else
+				newPos = UDim2.new(
+					data.frame.Position.X.Scale,
+					data.frame.Position.X.Offset,
+					0,
+					newYPos
+				)
+			end
+			
+			data.frame:TweenPosition(newPos, Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.3, true)
+		end
+	end
+	
+	notifications[notificationName] = nil
+	notificationYOffset = notificationYOffset - closedHeight
+end
+
 -- Remove window
 function gui.remove.window(name)
 	if windows[name] then
@@ -863,129 +1147,5 @@ end
 function closeWindow(name)
 	gui.remove.window(name)
 end
-
--- TEST CODE
-print("Working on it boss!")
-task.wait(2)
-
-gui.registerCallback("testButton", function()
-	print("Button clicked!")
-end)
-
-gui.registerCallback("testToggle", function(state)
-	print("Toggle state:", state)
-end)
-
-gui.registerCallback("testSlider", function(value)
-	print("Slider value:", value)
-end)
-
-gui.registerCallback("testDropdown", function(option)
-	print("Selected option:", option)
-end)
-
-gui.registerCallback("testCheckbox", function(state)
-	print("Checkbox state:", state)
-end)
-
-gui.registerCallback("testTextbox", function(text)
-	print("Text entered:", text)
-end)
-
-gui.registerCallback("onTabSwitch", function(tabName)
-	print("Switched to tab:", tabName)
-end)
-
-gui.add.window("TestWindow", {
-	title = "GUI Test Window",
-	closeable = true,
-	draggable = true,
-	tabs = {
-		{
-			name = "Main",
-			onSwitch = "onTabSwitch",
-			elements = {
-				{
-					type = "label",
-					text = "Main Tab Content",
-					position = UDim2.new(0, 10, 0, 8),
-					size = UDim2.new(1, -20, 0, 20)
-				},
-				{
-					type = "button",
-					text = "Click Me",
-					position = UDim2.new(0, 10, 0, 32),
-					size = UDim2.new(1, -20, 0, 26),
-					onClick = "testButton"
-				},
-				{
-					type = "toggle",
-					text = "Enable Feature",
-					position = UDim2.new(0, 10, 0, 62),
-					size = UDim2.new(1, -20, 0, 20),
-					defaultState = false,
-					onToggle = "testToggle"
-				},
-				{
-					type = "dropdown",
-					position = UDim2.new(0, 10, 0, 86),
-					size = UDim2.new(1, -20, 0, 24),
-					options = {"Option 1", "Option 2", "Option 3", "Option 4"},
-					default = "Option 1",
-					onSelect = "testDropdown"
-				}
-			}
-		},
-		{
-			name = "Settings",
-			onSwitch = "onTabSwitch",
-			elements = {
-				{
-					type = "label",
-					text = "Settings Tab Content",
-					position = UDim2.new(0, 10, 0, 8),
-					size = UDim2.new(1, -20, 0, 20)
-				},
-				{
-					type = "slider",
-					text = "Volume",
-					position = UDim2.new(0, 10, 0, 32),
-					size = UDim2.new(1, -20, 0, 22),
-					min = 0,
-					max = 100,
-					default = 50,
-					onSlide = "testSlider"
-				},
-				{
-					type = "checkbox",
-					text = "Accept Terms",
-					position = UDim2.new(0, 10, 0, 58),
-					size = UDim2.new(1, -20, 0, 20),
-					defaultState = false,
-					onChange = "testCheckbox"
-				}
-			}
-		},
-		{
-			name = "Info",
-			onSwitch = "onTabSwitch",
-			elements = {
-				{
-					type = "label",
-					text = "Info Tab Content",
-					position = UDim2.new(0, 10, 0, 8),
-					size = UDim2.new(1, -20, 0, 20)
-				},
-				{
-					type = "textbox",
-					placeholder = "Enter text here...",
-					position = UDim2.new(0, 10, 0, 32),
-					size = UDim2.new(1, -20, 0, 26),
-					onChange = "testTextbox"
-				}
-			}
-		}
-	}
-})
 
 return gui
