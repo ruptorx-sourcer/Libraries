@@ -1,84 +1,88 @@
 local metatable = {}
 
-local routes = {}
+-- Use specific instance metatables instead of hooking game globally
+local instanceMetatables = {}
 local originalMetamethods = {}
 
--- Cache
-local getgenv = getgenv or function() return _G end
-local getnamecallmethod = getnamecallmethod
-local hookmetamethod = hookmetamethod
+-- Cache functions
+local getrawmetatable = getrawmetatable
+local setreadonly = setreadonly
 local newcclosure = newcclosure or function(f) return f end
 local checkcaller = checkcaller or function() return false end
 
--- Route __index (property reads)
-function metatable.routeIndex(functionName)
-	if not originalMetamethods["__index"] then
-		originalMetamethods["__index"] = hookmetamethod(game, "__index", newcclosure(function(self, key)
-			-- Call routed function if it exists
-			if _G[functionName] then
-				local result = _G[functionName](self, key)
-				-- If function returns a value, use it
-				if result ~= nil then
-					return result
-				end
+-- Hook specific instance type metatable (stealth)
+local function hookInstanceMetatable(instanceType, metamethod, handler)
+	local success, sample = pcall(function()
+		return game:GetService("Players").LocalPlayer.Character:FindFirstChildOfClass(instanceType)
+	end)
+	
+	if not success then
+		-- Create a dummy instance to get its metatable
+		local dummyMap = {
+			Humanoid = function() 
+				return game:GetService("Players").LocalPlayer.Character:WaitForChild("Humanoid")
 			end
-			
-			-- Otherwise call original
-			return originalMetamethods["__index"](self, key)
-		end))
+		}
+		
+		if dummyMap[instanceType] then
+			sample = dummyMap[instanceType]()
+		end
 	end
+	
+	if sample then
+		local mt = getrawmetatable(sample)
+		setreadonly(mt, false)
+		
+		if not originalMetamethods[instanceType] then
+			originalMetamethods[instanceType] = {}
+		end
+		
+		if not originalMetamethods[instanceType][metamethod] then
+			originalMetamethods[instanceType][metamethod] = mt[metamethod]
+		end
+		
+		mt[metamethod] = newcclosure(handler)
+		setreadonly(mt, true)
+		
+		instanceMetatables[instanceType] = mt
+		return true
+	end
+	
+	return false
 end
 
--- Route __newindex (property writes)
-function metatable.routeNewIndex(functionName)
-	if not originalMetamethods["__newindex"] then
-		originalMetamethods["__newindex"] = hookmetamethod(game, "__newindex", newcclosure(function(self, key, value)
-			-- Call routed function if it exists
-			if _G[functionName] then
-				local result = _G[functionName](self, key, value)
-				-- If function returns false, BLOCK the write
-				if result == false then
-					return
-				end
-			end
-			
-			-- Otherwise allow the write
-			return originalMetamethods["__newindex"](self, key, value)
-		end))
-	end
-end
-
--- Route __namecall (method calls)
-function metatable.routeNamecall(functionName)
-	if not originalMetamethods["__namecall"] then
-		originalMetamethods["__namecall"] = hookmetamethod(game, "__namecall", newcclosure(function(...)
-			local args = {...}
-			local method = getnamecallmethod()
-			
-			-- Call routed function if it exists
-			if _G[functionName] then
-				local result = _G[functionName](method, ...)
-				if result ~= nil then
-					return result
-				end
-			end
-			
-			return originalMetamethods["__namecall"](...)
-		end))
-	end
-end
-
--- Hook
-function metatable.hookFunc(targetFunction, functionName)
-	local originalFunc = hookfunction(targetFunction, newcclosure(function(...)
+-- Route __index for specific instance type
+function metatable.routeIndexFor(instanceType, functionName)
+	return hookInstanceMetatable(instanceType, "__index", function(self, key)
 		if _G[functionName] then
-			local result = _G[functionName](...)
+			local result = _G[functionName](self, key)
 			if result ~= nil then
 				return result
 			end
 		end
-		return originalFunc(...)
-	end))
+		return originalMetamethods[instanceType]["__index"](self, key)
+	end)
+end
+
+-- Route __newindex for specific instance type
+function metatable.routeNewIndexFor(instanceType, functionName)
+	return hookInstanceMetatable(instanceType, "__newindex", function(self, key, value)
+		if _G[functionName] then
+			local result = _G[functionName](self, key, value)
+			if result == false then
+				return -- Block write
+			end
+		end
+		return originalMetamethods[instanceType]["__newindex"](self, key, value)
+	end)
+end
+
+-- Get original method (for direct calls)
+function metatable.getOriginal(instanceType, metamethod)
+	if originalMetamethods[instanceType] and originalMetamethods[instanceType][metamethod] then
+		return originalMetamethods[instanceType][metamethod]
+	end
+	return nil
 end
 
 return metatable
