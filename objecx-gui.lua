@@ -39,7 +39,9 @@ local palette = {
 	toggleOn = Color3.fromRGB(0, 180, 0),
 	toggleOff = Color3.fromRGB(80, 80, 80),
 	sliderFill = Color3.fromRGB(50, 130, 210),
-	closeButton = Color3.fromRGB(200, 20, 20)
+	closeButton = Color3.fromRGB(200, 20, 20),
+	tabActive = Color3.fromRGB(50, 130, 210),
+	tabInactive = Color3.fromRGB(25, 25, 25)
 }
 
 -- Initialize ScreenGui
@@ -79,12 +81,11 @@ end
 -- Calculate window height based on elements
 local function calculateWindowHeight(elements, scale)
 	if not elements or #elements == 0 then
-		return 100 * scale
+		return 50 * scale
 	end
 	
 	local maxY = 0
-	local lastElementIsDropdown = false
-	local dropdownOptionsCount = 0
+	local lastElement = elements[#elements]
 	
 	for i, elementData in ipairs(elements) do
 		local posY = elementData.position.Y.Offset
@@ -102,10 +103,6 @@ local function calculateWindowHeight(elements, scale)
 			sizeY = (elementData.size and elementData.size.Y.Offset) or (22 * scale)
 		elseif elementData.type == "dropdown" then
 			sizeY = (elementData.size and elementData.size.Y.Offset) or (24 * scale)
-			if i == #elements then
-				lastElementIsDropdown = true
-				dropdownOptionsCount = elementData.options and #elementData.options or 0
-			end
 		elseif elementData.type == "checkbox" then
 			sizeY = (elementData.size and elementData.size.Y.Offset) or (20 * scale)
 		end
@@ -116,9 +113,11 @@ local function calculateWindowHeight(elements, scale)
 		end
 	end
 	
-	local extraSpace = 26 * scale
-	if lastElementIsDropdown and dropdownOptionsCount > 0 then
-		extraSpace = extraSpace + (dropdownOptionsCount * 22 * scale) + (10 * scale)
+	local extraSpace = 13 * scale
+	
+	if lastElement and lastElement.type == "dropdown" then
+		local dropdownOptionsHeight = (#lastElement.options * 22 * scale) + (3 * scale)
+		extraSpace = extraSpace + dropdownOptionsHeight + (20 * scale)
 	end
 	
 	return maxY + extraSpace
@@ -135,13 +134,30 @@ function gui.add.window(name, properties)
 	
 	local scale = getScale()
 	
-	local calculatedHeight = properties.elements and calculateWindowHeight(properties.elements, scale) or (500 * scale)
+	local hasTabs = properties.tabs and #properties.tabs > 0
+	local tabBarHeight = hasTabs and (28 * scale) or 0
+	
+	local calculatedHeight = properties.elements and calculateWindowHeight(properties.elements, scale) or (50 * scale)
+	
+	if hasTabs then
+		local maxTabHeight = 0
+		for _, tabData in ipairs(properties.tabs) do
+			if tabData.elements then
+				local tabHeight = calculateWindowHeight(tabData.elements, scale)
+				if tabHeight > maxTabHeight then
+					maxTabHeight = tabHeight
+				end
+			end
+		end
+		calculatedHeight = maxTabHeight > 0 and maxTabHeight or (50 * scale)
+	end
+	
 	local windowHeight = properties.size and properties.size.Y.Offset or calculatedHeight
 	
 	local window = Instance.new("Frame")
 	window.Name = name
-	window.Size = UDim2.new(0, (properties.size and properties.size.X.Offset) or (400 * scale), 0, windowHeight)
-	window.Position = properties.position or UDim2.new(0.5, -((properties.size and properties.size.X.Offset or 400 * scale) / 2), 0.5, -(windowHeight / 2))
+	window.Size = UDim2.new(0, (properties.size and properties.size.X.Offset) or (400 * scale), 0, windowHeight + tabBarHeight)
+	window.Position = properties.position or UDim2.new(0.5, -((properties.size and properties.size.X.Offset or 400 * scale) / 2), 0.5, -((windowHeight + tabBarHeight) / 2))
 	window.BackgroundColor3 = properties.colors and properties.colors.bg or palette.windowBg
 	window.BackgroundTransparency = 0.15
 	window.BorderSizePixel = 0
@@ -177,7 +193,7 @@ function gui.add.window(name, properties)
 	
 	-- Close button
 	if properties.closeable then
-		local closeButtonSize = 18 * scale
+		local closeButtonSize = 17.1 * scale
 		local closeButton = Instance.new("TextButton")
 		closeButton.Name = "CloseButton"
 		closeButton.Size = UDim2.new(0, closeButtonSize, 0, closeButtonSize)
@@ -248,26 +264,126 @@ function gui.add.window(name, properties)
 		end
 	end)
 	
-	-- Container for elements
-	local container = Instance.new("Frame")
-	container.Name = "Container"
-	container.Size = UDim2.new(1, 0, 1, -(24 * scale))
-	container.Position = UDim2.new(0, 0, 0, 24 * scale)
-	container.BackgroundTransparency = 1
-	container.Parent = window
+	-- Tab bar
+	local tabBar, tabButtons, tabContainers
+	if hasTabs then
+		tabBar = Instance.new("Frame")
+		tabBar.Name = "TabBar"
+		tabBar.Size = UDim2.new(1, 0, 0, 28 * scale)
+		tabBar.Position = UDim2.new(0, 0, 0, 24 * scale)
+		tabBar.BackgroundColor3 = palette.windowTitle
+		tabBar.BackgroundTransparency = 0
+		tabBar.BorderSizePixel = 0
+		tabBar.Parent = window
+		
+		tabButtons = {}
+		tabContainers = {}
+		
+		local tabWidth = 1 / #properties.tabs
+		
+		for i, tabData in ipairs(properties.tabs) do
+			local tabButton = Instance.new("TextButton")
+			tabButton.Name = "Tab_" .. tabData.name
+			tabButton.Size = UDim2.new(tabWidth, -2 * scale, 1, -4 * scale)
+			tabButton.Position = UDim2.new(tabWidth * (i - 1), 1 * scale, 0, 2 * scale)
+			tabButton.BackgroundColor3 = i == 1 and palette.tabActive or palette.tabInactive
+			tabButton.BackgroundTransparency = 0.15
+			tabButton.BorderSizePixel = 0
+			tabButton.Text = tabData.name
+			tabButton.TextColor3 = palette.text
+			tabButton.Font = Enum.Font.SourceSans
+			tabButton.TextSize = 13.65 * scale
+			tabButton.Parent = tabBar
+			
+			local tabCorner = Instance.new("UICorner")
+			tabCorner.CornerRadius = UDim.new(0, 3 * scale)
+			tabCorner.Parent = tabButton
+			
+			local tabContainer = Instance.new("Frame")
+			tabContainer.Name = "TabContainer_" .. tabData.name
+			tabContainer.Size = UDim2.new(1, 0, 1, -(24 * scale + 28 * scale))
+			tabContainer.Position = UDim2.new(0, 0, 0, 24 * scale + 28 * scale)
+			tabContainer.BackgroundTransparency = 1
+			tabContainer.ClipsDescendants = false
+			tabContainer.Visible = i == 1
+			tabContainer.Parent = window
+			
+			tabButtons[tabData.name] = tabButton
+			tabContainers[tabData.name] = tabContainer
+			
+			tabButton.MouseButton1Click:Connect(function()
+				for tabName, btn in pairs(tabButtons) do
+					btn.BackgroundColor3 = palette.tabInactive
+					tabContainers[tabName].Visible = false
+				end
+				
+				tabButton.BackgroundColor3 = palette.tabActive
+				tabContainer.Visible = true
+				
+				if tabData.onSwitch then
+					executeCallback(tabData.onSwitch, tabData.name)
+				end
+			end)
+			
+			tabButton.MouseEnter:Connect(function()
+				if tabButton.BackgroundColor3 ~= palette.tabActive then
+					tabButton.BackgroundColor3 = palette.elementHover
+				end
+			end)
+			
+			tabButton.MouseLeave:Connect(function()
+				if tabButton.BackgroundColor3 ~= palette.tabActive then
+					tabButton.BackgroundColor3 = palette.tabInactive
+				end
+			end)
+		end
+	end
+	
+	-- Container for elements (or use first tab container if tabs exist)
+	local container
+	if hasTabs then
+		container = tabContainers[properties.tabs[1].name]
+	else
+		container = Instance.new("Frame")
+		container.Name = "Container"
+		container.Size = UDim2.new(1, 0, 1, -(24 * scale))
+		container.Position = UDim2.new(0, 0, 0, 24 * scale)
+		container.BackgroundTransparency = 1
+		container.ClipsDescendants = false
+		container.Parent = window
+	end
 	
 	-- Store window data
 	windows[name] = {
 		frame = window,
 		container = container,
 		elements = {},
-		scale = scale
+		scale = scale,
+		tabs = hasTabs and {
+			buttons = tabButtons,
+			containers = tabContainers
+		} or nil
 	}
 	
-	-- Create elements
+	-- Create elements (in appropriate tab containers if tabs exist)
 	if properties.elements then
 		for i, elementData in ipairs(properties.elements) do
-			createElement(name, elementData, i)
+			local targetContainer = container
+			if hasTabs and elementData.tab then
+				targetContainer = tabContainers[elementData.tab]
+			end
+			createElement(name, elementData, i, targetContainer)
+		end
+	end
+	
+	-- Create tab-specific elements
+	if hasTabs then
+		for _, tabData in ipairs(properties.tabs) do
+			if tabData.elements then
+				for i, elementData in ipairs(tabData.elements) do
+					createElement(name, elementData, i, tabContainers[tabData.name])
+				end
+			end
 		end
 	end
 	
@@ -275,12 +391,13 @@ function gui.add.window(name, properties)
 end
 
 -- Create element
-function createElement(windowName, elementData, index)
+function createElement(windowName, elementData, index, targetContainer)
 	local windowData = windows[windowName]
 	if not windowData then return end
 	
 	local scale = windowData.scale
 	local element
+	local container = targetContainer or windowData.container
 	
 	if elementData.type == "button" then
 		element = Instance.new("TextButton")
@@ -293,7 +410,7 @@ function createElement(windowName, elementData, index)
 		element.TextColor3 = elementData.colors and elementData.colors.text or palette.text
 		element.Font = Enum.Font.SourceSans
 		element.TextSize = 13.65 * scale
-		element.Parent = windowData.container
+		element.Parent = container
 		
 		local corner = Instance.new("UICorner")
 		corner.CornerRadius = UDim.new(0, 3 * scale)
@@ -323,7 +440,7 @@ function createElement(windowName, elementData, index)
 		element.Font = Enum.Font.SourceSans
 		element.TextSize = 13.65 * scale
 		element.TextXAlignment = Enum.TextXAlignment.Left
-		element.Parent = windowData.container
+		element.Parent = container
 		
 	elseif elementData.type == "textbox" then
 		element = Instance.new("TextBox")
@@ -339,7 +456,7 @@ function createElement(windowName, elementData, index)
 		element.Font = Enum.Font.SourceSans
 		element.TextSize = 13.65 * scale
 		element.ClearTextOnFocus = false
-		element.Parent = windowData.container
+		element.Parent = container
 		
 		local corner = Instance.new("UICorner")
 		corner.CornerRadius = UDim.new(0, 3 * scale)
@@ -352,11 +469,11 @@ function createElement(windowName, elementData, index)
 		end
 		
 	elseif elementData.type == "toggle" then
-		local container = Instance.new("Frame")
-		container.Size = elementData.size or UDim2.new(0, 200 * scale, 0, 20 * scale)
-		container.Position = elementData.position
-		container.BackgroundTransparency = 1
-		container.Parent = windowData.container
+		local toggleContainer = Instance.new("Frame")
+		toggleContainer.Size = elementData.size or UDim2.new(0, 200 * scale, 0, 20 * scale)
+		toggleContainer.Position = elementData.position
+		toggleContainer.BackgroundTransparency = 1
+		toggleContainer.Parent = container
 		
 		local toggleFrame = Instance.new("Frame")
 		toggleFrame.Size = UDim2.new(0, 40 * scale, 0, 20 * scale)
@@ -364,7 +481,7 @@ function createElement(windowName, elementData, index)
 		toggleFrame.BackgroundColor3 = elementData.colors and elementData.colors.disabled or palette.toggleOff
 		toggleFrame.BackgroundTransparency = 0.15
 		toggleFrame.BorderSizePixel = 0
-		toggleFrame.Parent = container
+		toggleFrame.Parent = toggleContainer
 		
 		local toggleCorner = Instance.new("UICorner")
 		toggleCorner.CornerRadius = UDim.new(1, 0)
@@ -391,7 +508,7 @@ function createElement(windowName, elementData, index)
 		toggleLabel.Font = Enum.Font.SourceSans
 		toggleLabel.TextSize = 13.65 * scale
 		toggleLabel.TextXAlignment = Enum.TextXAlignment.Left
-		toggleLabel.Parent = container
+		toggleLabel.Parent = toggleContainer
 		
 		local state = elementData.defaultState or false
 		
@@ -416,20 +533,20 @@ function createElement(windowName, elementData, index)
 		button.Size = UDim2.new(1, 0, 1, 0)
 		button.BackgroundTransparency = 1
 		button.Text = ""
-		button.Parent = container
+		button.Parent = toggleContainer
 		
 		button.MouseButton1Click:Connect(function()
 			updateToggle(not state)
 		end)
 		
-		element = container
+		element = toggleContainer
 		
 	elseif elementData.type == "slider" then
-		local container = Instance.new("Frame")
-		container.Size = elementData.size or UDim2.new(0, 200 * scale, 0, 22 * scale)
-		container.Position = elementData.position
-		container.BackgroundTransparency = 1
-		container.Parent = windowData.container
+		local sliderContainer = Instance.new("Frame")
+		sliderContainer.Size = elementData.size or UDim2.new(0, 200 * scale, 0, 22 * scale)
+		sliderContainer.Position = elementData.position
+		sliderContainer.BackgroundTransparency = 1
+		sliderContainer.Parent = container
 		
 		local min = elementData.min or 0
 		local max = elementData.max or 100
@@ -443,7 +560,7 @@ function createElement(windowName, elementData, index)
 		label.Font = Enum.Font.SourceSans
 		label.TextSize = 11.55 * scale
 		label.TextXAlignment = Enum.TextXAlignment.Left
-		label.Parent = container
+		label.Parent = sliderContainer
 		
 		local sliderBg = Instance.new("Frame")
 		sliderBg.Size = UDim2.new(1, 0, 0, 4 * scale)
@@ -451,7 +568,7 @@ function createElement(windowName, elementData, index)
 		sliderBg.BackgroundColor3 = elementData.colors and elementData.colors.bg or palette.elementBg
 		sliderBg.BackgroundTransparency = 0.15
 		sliderBg.BorderSizePixel = 0
-		sliderBg.Parent = container
+		sliderBg.Parent = sliderContainer
 		
 		local sliderCorner = Instance.new("UICorner")
 		sliderCorner.CornerRadius = UDim.new(1, 0)
@@ -517,15 +634,15 @@ function createElement(windowName, elementData, index)
 			end
 		end)
 		
-		element = container
+		element = sliderContainer
 		
 	elseif elementData.type == "dropdown" then
-		local container = Instance.new("Frame")
-		container.Size = elementData.size or UDim2.new(0, 200 * scale, 0, 24 * scale)
-		container.Position = elementData.position
-		container.BackgroundTransparency = 1
-		container.ClipsDescendants = false
-		container.Parent = windowData.container
+		local dropdownContainer = Instance.new("Frame")
+		dropdownContainer.Size = elementData.size or UDim2.new(0, 200 * scale, 0, 24 * scale)
+		dropdownContainer.Position = elementData.position
+		dropdownContainer.BackgroundTransparency = 1
+		dropdownContainer.ClipsDescendants = false
+		dropdownContainer.Parent = container
 		
 		local dropdownButton = Instance.new("TextButton")
 		dropdownButton.Size = UDim2.new(1, 0, 1, 0)
@@ -537,7 +654,7 @@ function createElement(windowName, elementData, index)
 		dropdownButton.Font = Enum.Font.SourceSans
 		dropdownButton.TextSize = 13.65 * scale
 		dropdownButton.TextXAlignment = Enum.TextXAlignment.Left
-		dropdownButton.Parent = container
+		dropdownButton.Parent = dropdownContainer
 		
 		local buttonCorner = Instance.new("UICorner")
 		buttonCorner.CornerRadius = UDim.new(0, 3 * scale)
@@ -565,7 +682,7 @@ function createElement(windowName, elementData, index)
 		optionsFrame.BorderSizePixel = 0
 		optionsFrame.Visible = false
 		optionsFrame.ZIndex = 1000
-		optionsFrame.Parent = container
+		optionsFrame.Parent = dropdownContainer
 		
 		local optionsCorner = Instance.new("UICorner")
 		optionsCorner.CornerRadius = UDim.new(0, 3 * scale)
@@ -611,14 +728,14 @@ function createElement(windowName, elementData, index)
 			optionsFrame.Visible = not optionsFrame.Visible
 		end)
 		
-		element = container
+		element = dropdownContainer
 		
 	elseif elementData.type == "checkbox" then
-		local container = Instance.new("Frame")
-		container.Size = elementData.size or UDim2.new(0, 200 * scale, 0, 20 * scale)
-		container.Position = elementData.position
-		container.BackgroundTransparency = 1
-		container.Parent = windowData.container
+		local checkboxContainer = Instance.new("Frame")
+		checkboxContainer.Size = elementData.size or UDim2.new(0, 200 * scale, 0, 20 * scale)
+		checkboxContainer.Position = elementData.position
+		checkboxContainer.BackgroundTransparency = 1
+		checkboxContainer.Parent = container
 		
 		local checkboxFrame = Instance.new("Frame")
 		checkboxFrame.Size = UDim2.new(0, 18 * scale, 0, 18 * scale)
@@ -627,7 +744,7 @@ function createElement(windowName, elementData, index)
 		checkboxFrame.BackgroundTransparency = 0.15
 		checkboxFrame.BorderSizePixel = 1
 		checkboxFrame.BorderColor3 = palette.border
-		checkboxFrame.Parent = container
+		checkboxFrame.Parent = checkboxContainer
 		
 		local checkboxCorner = Instance.new("UICorner")
 		checkboxCorner.CornerRadius = UDim.new(0, 3 * scale)
@@ -651,7 +768,7 @@ function createElement(windowName, elementData, index)
 		checkboxLabel.Font = Enum.Font.SourceSans
 		checkboxLabel.TextSize = 13.65 * scale
 		checkboxLabel.TextXAlignment = Enum.TextXAlignment.Left
-		checkboxLabel.Parent = container
+		checkboxLabel.Parent = checkboxContainer
 		
 		local state = elementData.defaultState or false
 		
@@ -670,13 +787,13 @@ function createElement(windowName, elementData, index)
 		button.Size = UDim2.new(1, 0, 1, 0)
 		button.BackgroundTransparency = 1
 		button.Text = ""
-		button.Parent = container
+		button.Parent = checkboxContainer
 		
 		button.MouseButton1Click:Connect(function()
 			updateCheckbox(not state)
 		end)
 		
-		element = container
+		element = checkboxContainer
 	end
 	
 	windowData.elements[index] = {
@@ -726,9 +843,149 @@ function gui.get.elementValue(windowName, elementIndex)
 	return nil
 end
 
+-- Switch to a specific tab
+function gui.switchTab(windowName, tabName)
+	local windowData = windows[windowName]
+	if not windowData or not windowData.tabs then return end
+	
+	for name, btn in pairs(windowData.tabs.buttons) do
+		btn.BackgroundColor3 = palette.tabInactive
+		windowData.tabs.containers[name].Visible = false
+	end
+	
+	if windowData.tabs.buttons[tabName] then
+		windowData.tabs.buttons[tabName].BackgroundColor3 = palette.tabActive
+		windowData.tabs.containers[tabName].Visible = true
+	end
+end
+
 -- Close window (external function)
 function closeWindow(name)
 	gui.remove.window(name)
 end
+
+-- TEST CODE
+print("Working on it boss!")
+task.wait(2)
+
+gui.registerCallback("testButton", function()
+	print("Button clicked!")
+end)
+
+gui.registerCallback("testToggle", function(state)
+	print("Toggle state:", state)
+end)
+
+gui.registerCallback("testSlider", function(value)
+	print("Slider value:", value)
+end)
+
+gui.registerCallback("testDropdown", function(option)
+	print("Selected option:", option)
+end)
+
+gui.registerCallback("testCheckbox", function(state)
+	print("Checkbox state:", state)
+end)
+
+gui.registerCallback("testTextbox", function(text)
+	print("Text entered:", text)
+end)
+
+gui.registerCallback("onTabSwitch", function(tabName)
+	print("Switched to tab:", tabName)
+end)
+
+gui.add.window("TestWindow", {
+	title = "GUI Test Window",
+	closeable = true,
+	draggable = true,
+	tabs = {
+		{
+			name = "Main",
+			onSwitch = "onTabSwitch",
+			elements = {
+				{
+					type = "label",
+					text = "Main Tab Content",
+					position = UDim2.new(0, 10, 0, 8),
+					size = UDim2.new(1, -20, 0, 20)
+				},
+				{
+					type = "button",
+					text = "Click Me",
+					position = UDim2.new(0, 10, 0, 32),
+					size = UDim2.new(1, -20, 0, 26),
+					onClick = "testButton"
+				},
+				{
+					type = "toggle",
+					text = "Enable Feature",
+					position = UDim2.new(0, 10, 0, 62),
+					size = UDim2.new(1, -20, 0, 20),
+					defaultState = false,
+					onToggle = "testToggle"
+				},
+				{
+					type = "dropdown",
+					position = UDim2.new(0, 10, 0, 86),
+					size = UDim2.new(1, -20, 0, 24),
+					options = {"Option 1", "Option 2", "Option 3", "Option 4"},
+					default = "Option 1",
+					onSelect = "testDropdown"
+				}
+			}
+		},
+		{
+			name = "Settings",
+			onSwitch = "onTabSwitch",
+			elements = {
+				{
+					type = "label",
+					text = "Settings Tab Content",
+					position = UDim2.new(0, 10, 0, 8),
+					size = UDim2.new(1, -20, 0, 20)
+				},
+				{
+					type = "slider",
+					text = "Volume",
+					position = UDim2.new(0, 10, 0, 32),
+					size = UDim2.new(1, -20, 0, 22),
+					min = 0,
+					max = 100,
+					default = 50,
+					onSlide = "testSlider"
+				},
+				{
+					type = "checkbox",
+					text = "Accept Terms",
+					position = UDim2.new(0, 10, 0, 58),
+					size = UDim2.new(1, -20, 0, 20),
+					defaultState = false,
+					onChange = "testCheckbox"
+				}
+			}
+		},
+		{
+			name = "Info",
+			onSwitch = "onTabSwitch",
+			elements = {
+				{
+					type = "label",
+					text = "Info Tab Content",
+					position = UDim2.new(0, 10, 0, 8),
+					size = UDim2.new(1, -20, 0, 20)
+				},
+				{
+					type = "textbox",
+					placeholder = "Enter text here...",
+					position = UDim2.new(0, 10, 0, 32),
+					size = UDim2.new(1, -20, 0, 26),
+					onChange = "testTextbox"
+				}
+			}
+		}
+	}
+})
 
 return gui
