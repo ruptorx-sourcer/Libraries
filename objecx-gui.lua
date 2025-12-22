@@ -3,6 +3,7 @@ gui.add = {}
 gui.remove = {}
 gui.update = {}
 gui.get = {}
+gui.console = {}
 
 local windows = {}
 local notifications = {}
@@ -10,6 +11,7 @@ local notificationYOffset = 10
 local screenGui
 local callbackFunctions = {}
 local windowZIndex = 1
+local consoles = {}
 
 -- Device detection and scaling
 local function getDeviceType()
@@ -24,7 +26,7 @@ end
 local function getScale()
 	local device = getDeviceType()
 	if device == "mobile" then
-		return 1  -- Changed from 0.9 to 1
+		return 1
 	else
 		return 0.75
 	end
@@ -43,7 +45,8 @@ local palette = {
 	sliderFill = Color3.fromRGB(50, 130, 210),
 	closeButton = Color3.fromRGB(200, 20, 20),
 	tabActive = Color3.fromRGB(50, 130, 210),
-	tabInactive = Color3.fromRGB(25, 25, 25)
+	tabInactive = Color3.fromRGB(25, 25, 25),
+	consoleBg = Color3.fromRGB(10, 10, 10)
 }
 
 -- Notification type colors
@@ -122,6 +125,8 @@ local function calculateWindowHeight(elements, scale)
 			sizeY = (elementData.size and elementData.size.Y.Offset) or (24 * scale)
 		elseif elementData.type == "checkbox" then
 			sizeY = (elementData.size and elementData.size.Y.Offset) or (20 * scale)
+		elseif elementData.type == "console" then
+			sizeY = (elementData.size and elementData.size.Y.Offset) or (150 * scale)
 		end
 		
 		local elementBottom = posY + sizeY
@@ -132,13 +137,11 @@ local function calculateWindowHeight(elements, scale)
 	
 	local extraSpace = 8 * scale
 	
-	-- Add extra space if last element is a dropdown
 	if lastElement and lastElement.type == "dropdown" then
 		local dropdownOptionsHeight = (#lastElement.options * 22 * scale) + (3 * scale)
 		extraSpace = extraSpace + dropdownOptionsHeight + (20 * scale)
 	end
 	
-	-- Add extra space if last element is a label (text element)
 	if lastElement and lastElement.type == "label" then
 		extraSpace = extraSpace + (13 * scale)
 	end
@@ -146,7 +149,191 @@ local function calculateWindowHeight(elements, scale)
 	return maxY + extraSpace
 end
 
--- Create window
+-- Create popup window
+function gui.add.popup(name, properties)
+	initScreenGui()
+	
+	if windows[name] then
+		warn("Window '" .. name .. "' already exists")
+		return
+	end
+	
+	local scale = getScale()
+	
+	-- Calculate popup size based on content
+	local hasImage = properties.imageLabel and properties.imageLabel ~= "" and properties.imageLabel ~= "0"
+	local buttonCount = properties.buttons and #properties.buttons or 0
+	
+	local popupWidth = 300 * scale
+	local popupHeight = 100 * scale
+	
+	if hasImage then
+		popupHeight = popupHeight + (60 * scale)
+	end
+	
+	if buttonCount > 0 then
+		popupHeight = popupHeight + (40 * scale)
+	end
+	
+	local popup = Instance.new("Frame")
+	popup.Name = name
+	popup.Size = UDim2.new(0, popupWidth, 0, popupHeight)
+	popup.Position = properties.position or UDim2.new(0.5, -(popupWidth / 2), 0.5, -(popupHeight / 2))
+	popup.BackgroundColor3 = palette.windowBg
+	popup.BackgroundTransparency = 0.1
+	popup.BorderSizePixel = 0
+	popup.Parent = screenGui
+	
+	bringToFront(popup)
+	
+	local popupCorner = Instance.new("UICorner")
+	popupCorner.CornerRadius = UDim.new(0, 8 * scale)
+	popupCorner.Parent = popup
+	
+	-- Title bar
+	local titleBar = Instance.new("Frame")
+	titleBar.Name = "TitleBar"
+	titleBar.Size = UDim2.new(1, 0, 0, 30 * scale)
+	titleBar.BackgroundColor3 = palette.windowTitle
+	titleBar.BackgroundTransparency = 0
+	titleBar.BorderSizePixel = 0
+	titleBar.Parent = popup
+	
+	local titleCorner = Instance.new("UICorner")
+	titleCorner.CornerRadius = UDim.new(0, 8 * scale)
+	titleCorner.Parent = titleBar
+	
+	local titleLabel = Instance.new("TextLabel")
+	titleLabel.Name = "Title"
+	titleLabel.Size = UDim2.new(1, properties.closeable and -(30 * scale) or 0, 1, 0)
+	titleLabel.BackgroundTransparency = 1
+	titleLabel.Text = properties.title or name
+	titleLabel.TextColor3 = palette.text
+	titleLabel.Font = Enum.Font.SourceSansBold
+	titleLabel.TextSize = 16 * scale
+	titleLabel.TextXAlignment = Enum.TextXAlignment.Center
+	titleLabel.Parent = titleBar
+	
+	-- Close button
+	if properties.closeable then
+		local closeButtonSize = 20 * scale
+		local closeButton = Instance.new("TextButton")
+		closeButton.Name = "CloseButton"
+		closeButton.Size = UDim2.new(0, closeButtonSize, 0, closeButtonSize)
+		closeButton.Position = UDim2.new(1, -(closeButtonSize + 5 * scale), 0.5, -(closeButtonSize / 2))
+		closeButton.BackgroundColor3 = palette.closeButton
+		closeButton.BackgroundTransparency = 0
+		closeButton.BorderSizePixel = 0
+		closeButton.Text = "×"
+		closeButton.TextColor3 = palette.text
+		closeButton.Font = Enum.Font.SourceSansBold
+		closeButton.TextSize = 18 * scale
+		closeButton.Parent = titleBar
+		
+		local closeCorner = Instance.new("UICorner")
+		closeCorner.CornerRadius = UDim.new(0.5, 0)
+		closeCorner.Parent = closeButton
+		
+		closeButton.MouseEnter:Connect(function()
+			closeButton.BackgroundColor3 = Color3.fromRGB(220, 30, 30)
+		end)
+		
+		closeButton.MouseLeave:Connect(function()
+			closeButton.BackgroundColor3 = palette.closeButton
+		end)
+		
+		closeButton.MouseButton1Click:Connect(function()
+			gui.remove.window(name)
+		end)
+	end
+	
+	local contentY = 40 * scale
+	
+	-- Image label
+	if hasImage then
+		local imageLabel = Instance.new("ImageLabel")
+		imageLabel.Name = "PopupImage"
+		imageLabel.Size = UDim2.new(0, 50 * scale, 0, 50 * scale)
+		imageLabel.Position = UDim2.new(0.5, -(25 * scale), 0, contentY)
+		imageLabel.BackgroundTransparency = 1
+		imageLabel.Image = properties.imageLabel
+		imageLabel.Parent = popup
+		
+		local imageCorner = Instance.new("UICorner")
+		imageCorner.CornerRadius = UDim.new(0, 6 * scale)
+		imageCorner.Parent = imageLabel
+		
+		contentY = contentY + (60 * scale)
+	end
+	
+	-- Message label
+	local messageLabel = Instance.new("TextLabel")
+	messageLabel.Name = "Message"
+	messageLabel.Size = UDim2.new(1, -20 * scale, 0, 40 * scale)
+	messageLabel.Position = UDim2.new(0, 10 * scale, 0, contentY)
+	messageLabel.BackgroundTransparency = 1
+	messageLabel.Text = properties.message or ""
+	messageLabel.TextColor3 = palette.text
+	messageLabel.Font = Enum.Font.SourceSans
+	messageLabel.TextSize = 14 * scale
+	messageLabel.TextWrapped = true
+	messageLabel.TextXAlignment = Enum.TextXAlignment.Center
+	messageLabel.TextYAlignment = Enum.TextYAlignment.Top
+	messageLabel.Parent = popup
+	
+	-- Buttons
+	if properties.buttons and #properties.buttons > 0 then
+		local buttonY = popupHeight - (35 * scale)
+		local buttonWidth = (#properties.buttons == 1) and (popupWidth - 20 * scale) or ((popupWidth - 30 * scale) / 2)
+		
+		for i, btnData in ipairs(properties.buttons) do
+			if i > 2 then break end
+			
+			local buttonX = (i == 1) and (10 * scale) or (popupWidth / 2 + 5 * scale)
+			
+			local button = Instance.new("TextButton")
+			button.Name = "Button" .. i
+			button.Size = UDim2.new(0, buttonWidth, 0, 28 * scale)
+			button.Position = UDim2.new(0, buttonX, 0, buttonY)
+			button.BackgroundColor3 = palette.elementBg
+			button.BackgroundTransparency = 0.15
+			button.BorderSizePixel = 0
+			button.Text = btnData.text or "Button"
+			button.TextColor3 = palette.text
+			button.Font = Enum.Font.SourceSans
+			button.TextSize = 14 * scale
+			button.Parent = popup
+			
+			local btnCorner = Instance.new("UICorner")
+			btnCorner.CornerRadius = UDim.new(0, 4 * scale)
+			btnCorner.Parent = button
+			
+			button.MouseEnter:Connect(function()
+				button.BackgroundColor3 = palette.elementHover
+			end)
+			
+			button.MouseLeave:Connect(function()
+				button.BackgroundColor3 = palette.elementBg
+			end)
+			
+			if btnData.onClick then
+				button.MouseButton1Click:Connect(function()
+					executeCallback(btnData.onClick)
+				end)
+			end
+		end
+	end
+	
+	windows[name] = {
+		frame = popup,
+		type = "popup",
+		scale = scale
+	}
+	
+	return popup
+end
+
+-- Create normal window
 function gui.add.window(name, properties)
 	initScreenGui()
 	
@@ -382,6 +569,7 @@ function gui.add.window(name, properties)
 		container = container,
 		elements = {},
 		scale = scale,
+		type = "normal",
 		tabs = hasTabs and {
 			buttons = tabButtons,
 			containers = tabContainers
@@ -422,7 +610,57 @@ function createElement(windowName, elementData, index, targetContainer)
 	local element
 	local container = targetContainer or windowData.container
 	
-	if elementData.type == "button" then
+	if elementData.type == "console" then
+		local consoleFrame = Instance.new("Frame")
+		consoleFrame.Size = elementData.size or UDim2.new(0, 300 * scale, 0, 150 * scale)
+		consoleFrame.Position = elementData.position
+		consoleFrame.BackgroundColor3 = elementData.backgroundColor or palette.consoleBg
+		consoleFrame.BackgroundTransparency = 0.1
+		consoleFrame.BorderSizePixel = 1
+		consoleFrame.BorderColor3 = palette.border
+		consoleFrame.Parent = container
+		
+		local consoleCorner = Instance.new("UICorner")
+		consoleCorner.CornerRadius = UDim.new(0, 4 * scale)
+		consoleCorner.Parent = consoleFrame
+		
+		local consoleList = Instance.new("Frame")
+		consoleList.Name = "ConsoleList"
+		consoleList.Size = UDim2.new(1, -4 * scale, 1, -4 * scale)
+		consoleList.Position = UDim2.new(0, 2 * scale, 0, 2 * scale)
+		consoleList.BackgroundTransparency = 1
+		consoleList.ClipsDescendants = true
+		consoleList.Parent = consoleFrame
+		
+		local scrollFrame = nil
+		if elementData.isScrollable then
+			scrollFrame = Instance.new("ScrollingFrame")
+			scrollFrame.Size = UDim2.new(1, 0, 1, 0)
+			scrollFrame.BackgroundTransparency = 1
+			scrollFrame.BorderSizePixel = 0
+			scrollFrame.ScrollBarThickness = 4 * scale
+			scrollFrame.ScrollBarImageColor3 = palette.text
+			scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+			scrollFrame.Parent = consoleList
+			
+			consoleList = scrollFrame
+		end
+		
+		-- Store console data
+		consoles[windowName] = {
+			frame = consoleFrame,
+			listFrame = consoleList,
+			scrollFrame = scrollFrame,
+			lines = {},
+			isScrollable = elementData.isScrollable or false,
+			maxLines = math.floor((elementData.size and elementData.size.Y.Offset or 150 * scale) / (14 * scale)),
+			lineHeight = 14 * scale,
+			scale = scale
+		}
+		
+		element = consoleFrame
+		
+	elseif elementData.type == "button" then
 		element = Instance.new("TextButton")
 		element.Size = elementData.size or UDim2.new(0, 150 * scale, 0, 26 * scale)
 		element.Position = elementData.position
@@ -825,6 +1063,88 @@ function createElement(windowName, elementData, index, targetContainer)
 	}
 end
 
+-- Console functions
+function gui.console.addLine(windowName, text, textColor)
+	local console = consoles[windowName]
+	if not console then
+		warn("Console not found for window:", windowName)
+		return
+	end
+	
+	local scale = console.scale
+	local lineHeight = console.lineHeight
+	
+	-- Create text label for line
+	local lineLabel = Instance.new("TextLabel")
+	lineLabel.Size = UDim2.new(1, -4 * scale, 0, lineHeight)
+	lineLabel.BackgroundTransparency = 1
+	lineLabel.Text = text
+	lineLabel.TextColor3 = textColor or palette.text
+	lineLabel.Font = Enum.Font.SourceSans
+	lineLabel.TextSize = 12 * scale
+	lineLabel.TextXAlignment = Enum.TextXAlignment.Left
+	lineLabel.TextYAlignment = Enum.TextYAlignment.Top
+	lineLabel.TextWrapped = true
+	lineLabel.Parent = console.listFrame
+	
+	-- Calculate text height for wrapping
+	local textService = game:GetService("TextService")
+	local textBounds = textService:GetTextSize(text, 12 * scale, Enum.Font.SourceSans, Vector2.new(lineLabel.AbsoluteSize.X, math.huge))
+	local actualHeight = math.max(lineHeight, textBounds.Y)
+	lineLabel.Size = UDim2.new(1, -4 * scale, 0, actualHeight)
+	
+	table.insert(console.lines, lineLabel)
+	
+	-- Reposition all lines
+	local yPos = 0
+	for i, line in ipairs(console.lines) do
+		line.Position = UDim2.new(0, 2 * scale, 0, yPos)
+		yPos = yPos + line.Size.Y.Offset
+	end
+	
+	-- If scrollable, update canvas size
+	if console.isScrollable and console.scrollFrame then
+		console.scrollFrame.CanvasSize = UDim2.new(0, 0, 0, yPos)
+		console.scrollFrame.CanvasPosition = Vector2.new(0, yPos)
+	else
+		-- If not scrollable, remove old lines that don't fit
+		local maxHeight = console.frame.AbsoluteSize.Y - 4 * scale
+		while yPos > maxHeight and #console.lines > 0 do
+			local firstLine = console.lines[1]
+			yPos = yPos - firstLine.Size.Y.Offset
+			firstLine:Destroy()
+			table.remove(console.lines, 1)
+			
+			-- Reposition remaining lines
+			yPos = 0
+			for i, line in ipairs(console.lines) do
+				line.Position = UDim2.new(0, 2 * scale, 0, yPos)
+				yPos = yPos + line.Size.Y.Offset
+			end
+		end
+	end
+end
+
+function gui.console.clear(windowName)
+	local console = consoles[windowName]
+	if not console then
+		warn("Console not found for window:", windowName)
+		return
+	end
+	
+	-- Destroy all lines
+	for _, line in ipairs(console.lines) do
+		line:Destroy()
+	end
+	
+	console.lines = {}
+	
+	-- Reset canvas size if scrollable
+	if console.isScrollable and console.scrollFrame then
+		console.scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+	end
+end
+
 -- Create notification
 function gui.add.notification(notificationName, properties)
 	initScreenGui()
@@ -1091,6 +1411,11 @@ function gui.remove.window(name)
 	if windows[name] then
 		windows[name].frame:Destroy()
 		windows[name] = nil
+		
+		-- Clean up console if it exists
+		if consoles[name] then
+			consoles[name] = nil
+		end
 	end
 end
 
